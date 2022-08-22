@@ -1,0 +1,1109 @@
+---
+title: 'Cotton strips - Respiration rate, mass and tensile strength '
+output:
+  html_document:
+    code_fold: hide
+    fig_caption: yes
+    highlight: zenburn
+    theme: readable
+  pdf_document: default
+---
+#### Stressors: x1 = Sediment addition (yes/no) and x2 = Pesticide addition (0, 0.3, 3, 30 µg/L)
+#### Response: y = Mass (loss) and tensile strength of cotton strips and respiration rate of biofilm on cotton strips
+# 1. Load and inspect data
+```{r, message=FALSE, warning=FALSE}
+library("htmltools")
+library("jsonlite")
+library("lme4")
+library("MuMIn")
+library("lmerTest")
+library("nnet")
+library("ordinal")
+library("ape")
+library("sp")
+library("emdbook")
+library("pacman")
+library("psych")
+library("usdm")
+library("PerformanceAnalytics")
+library("ggsignif")
+library("ggplot2")
+library("jmv")
+library("tidyverse")
+library("ggpubr")
+library("car")
+library("DHARMa")
+library("digest")
+library("pak")
+```
+
+Load data
+```{r}
+data <- read.csv("data_prepared.csv", header = TRUE, sep = ";",
+                 dec = ".")
+```
+
+Set variables and random effects
+```{r}
+Rr   <-  data$Rr # Response variable
+Ts   <-  data$X._loss
+k    <-  data$k
+Ts_d <-  data$X._loss_daily
+sediment  <-   as.factor(data$sediment.f) # Stressor 1
+pesticide <-   as.factor(data$pesticides.f) # Stressor 2
+
+header  <-  as.factor(data$header) # Random effect
+days    <-  as.factor(data$day) # Random effect
+position  <-  as.factor(data$location) # Random effect
+cover     <-  as.factor(data$sed.cover)
+
+data_28 <- subset(data, day==28)
+data_35 <- subset(data, day==35)
+position1 <- subset(data, location=="first")
+position2 <- subset(data, location=="second")
+cover   <- subset(data, sed.cover==1)
+nocover <- subset(data, sed.cover==0)
+```
+
+Check some stats
+```{r, warning=FALSE}
+descriptives(data, vars=c("Rr", "X._loss", "X._loss_daily", "k", "sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+descriptives(data_28, vars=c("Rr", "X._loss", "X._loss_daily", "k","sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+descriptives(data_35, vars=c("Rr", "X._loss", "X._loss_daily", "k","sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+descriptives(position1, vars=c("Rr", "X._loss", "X._loss_daily", "k","sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+descriptives(position2, vars=c("Rr", "X._loss", "X._loss_daily", "k","sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+descriptives(cover, vars=c("Rr", "X._loss", "X._loss_daily", "k","sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+descriptives(nocover, vars=c("Rr", "X._loss", "X._loss_daily", "k","sediment.f", "pesticides.f"), sd=T, missing=T, freq=F)
+```
+
+
+Distribution of dependent variable --> p > .05 means normal distribution
+```{r, warning=FALSE}
+ggqqplot(Rr)
+ggqqplot(Ts)
+ggqqplot(k)
+
+shapiro.test(Rr)
+shapiro.test(Ts)
+shapiro.test(k)
+```
+
+## 1.1 Check influence of respiration time and sediment coverage of strips
+### 1.1.1 Respiration time
+```{r, warning=FALSE}
+plot(data$Incubation.time..h., data$X02.loss..mg.l., type="p", col="darkcyan", pch=16, xlab="Time of respiration (in h)", ylab="O2 loss (in mg/L")
+plot(data$Incubation.time..h., data$Rr, type="p", col="darkcyan", pch=16, xlab="Time of respiration (in h)", ylab="Respiration rate (in mg O2/g cotton/h)")
+```
+
+### 1.1.2 Fine sediment coverage
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(group=sed.cov, sed.cov, Rr)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on respiration of cotton strips") +
+    xlab("Coverage of fine sediment") +
+    ylab("Respiration rate")
+
+ggplot(data=data_28, mapping=aes(group=sed.cov, sed.cov, Rr)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on respiration of cotton strips, day 28") +
+    xlab("Coverage of fine sediment") +
+    ylab("Respiration rate") 
+
+ggplot(data=data_35, mapping=aes(group=sed.cov, sed.cov, Rr)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on respiration of cotton strips, day 35") +
+    xlab("Coverage of fine sediment") +
+    ylab("Respiration rate")
+
+ggplot(data=data, mapping=aes(group=sed.cov, sed.cov, X._loss)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on tensile strength of cotton strips") +
+    xlab("Coverage of fine sediment") +
+    ylab("% Tensile strength loss")+
+  stat_compare_means(label.y = 1.5) 
+
+ggplot(data=data_28, mapping=aes(group=sed.cov, sed.cov, X._loss)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on tensile strength of cotton strips, day 28") +
+    xlab("Coverage of fine sediment") +
+    ylab("% Tensile strength loss")
+
+ggplot(data=data_35, mapping=aes(group=sed.cov, sed.cov, X._loss)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on tensile strength of cotton strips, day 35") +
+    xlab("Coverage of fine sediment") +
+    ylab("% Tensile strength loss") 
+
+
+ggplot(data=data, mapping=aes(group=sed.cov, sed.cov, k)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on decay rate of cotton strips") +
+    xlab("Coverage of fine sediment") +
+    ylab("decay rate")+
+  stat_compare_means(label.y = 1.5) 
+
+
+ggplot(data=data_28, mapping=aes(group=sed.cov, sed.cov, k)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on decay rate of cotton strips, day 28") +
+    xlab("Coverage of fine sediment") +
+    ylab("decay rate")
+
+ggplot(data=data_35, mapping=aes(group=sed.cov, sed.cov, k)) +
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("covered", "not covered")), map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment coverage on decay rate of cotton strips, day 35") +
+    xlab("Coverage of fine sediment") +
+    ylab("decay rate") 
+
+
+
+```
+
+## 1.2 Check correlation of cotton strip mass and tensile strength
+```{r, warning=FALSE}
+plot(log(data$mass), log(Ts), type="p", col="darkcyan", pch=16, xlab="Mass of cotton strips", ylab="% Tensile strength loss")
+chart.Correlation(log(data[c(16,21)]), histogram=TRUE, pch=19, method = "pearson")
+
+plot(log(data$mass), log(k), type="p", col="darkcyan", pch=16, xlab="Mass of cotton strips", ylab="decay rate")
+chart.Correlation(log(data[c(16,21)]), histogram=TRUE, pch=19, method = "pearson")
+```
+## 1.3 Check relationship respiration and tensile strength
+```{r, warning=FALSE}
+plot(log(data$Rr), log(Ts), type="p", col="darkcyan", pch=16, xlab="Respiration rate", ylab="% Tensile strength loss")
+fit <- lm(Ts~Rr, data=data)
+summary(fit)
+chart.Correlation(log(data[c(17,21)]), histogram=TRUE, pch=19, method = "pearson")
+```
+
+# 2  **Respiration rate (in mg O~2~/g cotton/h)**
+## 2.1 Influence of incubation time on respiration rate
+red   = First position in channel  
+blue = Second position in channel
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(group=days, days, Rr)) + 
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("28", "35")), map_signif_level=TRUE) +
+  geom_jitter(colour=ifelse(position=="first", "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of incubation time on respiration rate") +
+    xlab("Days of incubation") +
+    ylab("Respiration rate")
+```
+
+## 2.2 Influence of position on respiration rate 
+*(Positions: first ≈ 5 o'clock; second ≈ 7 o'clock from inflow)*  
+red   = 28 days of incubation  
+blue = 35 days of incubation
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(position, Rr))+
+  geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("first", "second")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of position on respiration rate") +
+    xlab("Strip position within channel") +
+    ylab("Respiration rate")
+```
+
+## 2.3 Stressor influences on respiration rate - **Day 28**
+```{r, warning=FALSE}
+Pesticides_28 <- factor(data_28$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data_28, mapping=aes(sediment.f, Rr)) + 
+  geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on respiration rate - day 28") +
+    xlab("Sediment addition") +
+    ylab("Respiration rate")
+
+ggplot(data=data_28, mapping=aes(x=Pesticides_28, y=Rr)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+      geom_signif(comparisons = list(c("low", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("high", "medium")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("none", "high")),  map_signif_level=TRUE) +
+  geom_jitter(color="black", size=0.6, alpha=0.9) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on respiration rate - day 28") +
+    xlab("Pesticide treatment") +
+    ylab("Respiration rate")
+
+
+ggplot(data_28, aes(x=Pesticides_28, y=Rr, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on respiration rate - day 28") +
+    xlab("Pesticide treatment") +
+    ylab("Respiration rate")
+
+par(mfrow=c(1,1))
+```
+
+## 2.4 Stressor influences on respiration rate - **Day 35**
+```{r, warning=FALSE}
+Pesticides_35 <- factor(data_35$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data_35, mapping=aes(sediment.f, Rr)) + 
+  geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on respiration rate - day 35") +
+    xlab("Sediment addition") +
+    ylab("Respiration rate")
+
+
+ggplot(data=data_35, mapping=aes(x=Pesticides_35, y=Rr)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+      geom_signif(comparisons = list(c("low", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("high", "medium")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("none", "high")),  map_signif_level=TRUE) +
+  geom_jitter(color="black", size=0.6, alpha=0.9) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on respiration rate - day 35") +
+    xlab("Pesticide treatment") +
+    ylab("Respiration rate")
+
+
+ggplot(data_35, aes(x=Pesticides_35, y=Rr, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on respiration rate - day 35") +
+    xlab("Pesticide treatment") +
+    ylab("Respiration rate")
+
+par(mfrow=c(1,1))
+```
+
+## 2.5 Stressor influences on respiration rate - **Days combined**
+```{r, warning=FALSE}
+pesticide <- factor(data$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data, mapping=aes(sediment.f, Rr)) + geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on respiration rate - days combined") +
+    xlab("Sediment addition") +
+    ylab("Respiration rate")
+
+
+ggplot(data=data, mapping=aes(x=pesticide, y=Rr)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+      geom_signif(comparisons = list(c("low", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("high", "medium")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("none", "high")),  map_signif_level=TRUE) +
+  geom_jitter(color="black", size=0.6, alpha=0.9) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on respiration rate - days combined") +
+    xlab("Pesticide treatment") +
+    ylab("Respiration rate")
+
+
+ggplot(data, aes(x=pesticide, y=Rr, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on respiration rate - days combined") +
+    xlab("Pesticide treatment") +
+    ylab("Respiration rate")
+par(mfrow=c(1,1))
+```
+
+# 3  ** % Tensile strength loss**
+## 3.1 Influence of incubation time on % tensile strength loss
+red   = First position in channel  
+blue = Second position in channel
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(group=days, days, X._loss)) + 
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("28", "35")), map_signif_level=TRUE) +
+  geom_jitter(colour=ifelse(position=="first", "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of incubation time on tensile strength of cotton strips") +
+    xlab("Days of incubation") +
+    ylab("% tensile strength loss")+
+  stat_compare_means(label.y = 1.5) 
+
+ggplot(data=data, mapping=aes(group=days, days, X._loss_daily)) + 
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("28", "35")), map_signif_level=TRUE) +
+  geom_jitter(colour=ifelse(position=="first", "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of incubation time on tensile strength of cotton strips") +
+    xlab("Days of incubation") +
+    ylab("% daily tensile strength loss")+
+  stat_compare_means(label.y = 1.5) 
+```
+
+## 3.2 Influence of position on % loss in tensile strength 
+*(Positions: first ≈ 5 o'clock; second ≈ 7 o'clock from inflow)*  
+red   = 28 days of incubation  
+blue = 35 days of incubation
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(position, X._loss))+
+  geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("first", "second")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of position on tensile strength") +
+    xlab("Strip position within channel") +
+    ylab("% loss in tensile strength")+
+  stat_compare_means(label.y = 1.5) 
+
+ggplot(data=data, mapping=aes(position, X._loss_daily))+
+  geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("first", "second")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of position on tensile strength") +
+    xlab("Strip position within channel") +
+    ylab("daily % loss in tensile strength")+
+  stat_compare_means(label.y = 1.5) 
+```
+
+## 3.3 Influence of incubation time and position on loss in tensile strength
+```{r, warning=FALSE}
+ggplot(data, aes(x=position, y=X._loss, fill=days)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of incubation time and position within channel") +
+    xlab("Position of strip") +
+    ylab("% loss in tensile strength") 
+
+```
+
+## 3.4 Stressor influences on loss in tensile strength - **Day 28**
+```{r, warning=FALSE}
+Pesticides_28 <- factor(data_28$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data_28, mapping=aes(sediment.f, X._loss)) + geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on tensile strength - day 28") +
+    xlab("Sediment addition") +
+    ylab("% loss in tensile strength")
+
+# only not covered strips
+data_28_nc <- subset(data_28, sed.cover==0)
+ggplot(data=data_28_nc, mapping=aes(sediment.f, X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on tensile strength - days combined") +
+    xlab("Sediment addition") +
+    ylab("% loss in tensile strength")
+
+
+ggplot(data=data_28, mapping=aes(x=Pesticides_28, y=X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+  geom_signif(comparisons = list(c("none", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("low", "none")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("medium", "none")),  map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on tensile strength - day 28") +
+    xlab("Pesticide treatment") +
+    ylab("% loss in tensile strength")
+
+
+ggplot(data_28, aes(x=Pesticides_28, y=X._loss, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on strip tensile strength - day 28") +
+    xlab("Pesticide treatment") +
+    ylab("% loss in tensile strength")
+
+par(mfrow=c(1,1))
+```
+
+## 3.5 Stressor influences on loss in tensile strength - **Day 35**
+```{r, warning=FALSE}
+Pesticides_35 <- factor(data_35$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data_35, mapping=aes(sediment.f, X._loss)) + geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on tensile strength - day 35") +
+    xlab("Sediment addition") +
+    ylab("% loss in tensile strength")
+
+# only not covered strips
+data_35_nc <- subset(data_28, sed.cover==0)
+ggplot(data=data_35_nc, mapping=aes(sediment.f, X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on tensile strength - days combined") +
+    xlab("Sediment addition") +
+    ylab("% loss in tensile strength")
+
+ggplot(data=data_35, mapping=aes(x=Pesticides_35, y=X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+  geom_signif(comparisons = list(c("none", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("low", "none")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("medium", "none")),  map_signif_level=TRUE) +
+    theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on tensile strength - day 35") +
+    xlab("Pesticide treatment") +
+    ylab("% loss in tensile strength")
+
+
+ggplot(data_35, aes(x=Pesticides_35, y=X._loss, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+    theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on tensile strength - day 35") +
+    xlab("Pesticide treatment") +
+    ylab("% loss in tensile strength")
+
+par(mfrow=c(1,1))
+```
+
+## 3.6 Stressor influences on loss in tensile strength - **Days combined**
+```{r, warning=FALSE}
+pesticide <- factor(data$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data, mapping=aes(sediment.f, X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on tensile strength - days combined") +
+    xlab("Sediment addition") +
+    ylab("% loss in tensile strength")
+
+# only not covered strips
+ggplot(data=nocover, mapping=aes(sediment.f, X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on tensile strength - days combined") +
+    xlab("Sediment addition") +
+    ylab("% loss in tensile strength")
+
+ggplot(data=data, mapping=aes(x=pesticide, y=X._loss)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+  geom_signif(comparisons = list(c("none", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("low", "none")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("medium", "none")),  map_signif_level=TRUE) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on tensile strength - days combined") +
+    xlab("Pesticide treatment") +
+    ylab("% loss in tensile strength")
+
+ggplot(data, aes(x=pesticide, y=X._loss, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on tensile strength - days combined") +
+    xlab("Pesticide treatment") +
+    ylab("% loss in tensile strength")
+
+par(mfrow=c(1,1))
+```
+
+# 4  ** Decay rate**
+## 4.1 Influence of incubation time on decay rate
+red   = First position in channel  
+blue = Second position in channel
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(group=days, days, k)) + 
+  geom_boxplot(alpha=0.8, fill="gold3") + 
+   geom_signif(comparisons = list(c("28", "35")), map_signif_level=TRUE) +
+  geom_jitter(colour=ifelse(position=="first", "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of incubation time on decay rate of cotton strips") +
+    xlab("Days of incubation") +
+    ylab("decay rate")
+```
+
+## 4.2 Influence of position on decay rate 
+*(Positions: first ≈ 5 o'clock; second ≈ 7 o'clock from inflow)*  
+red   = 28 days of incubation  
+blue = 35 days of incubation
+```{r, warning=FALSE}
+ggplot(data=data, mapping=aes(position, k))+
+  geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("first", "second")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1.5, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of position on decay rate") +
+    xlab("Strip position within channel") +
+    ylab("decay rate")
+
+```
+
+## 4.3 Influence of incubation time and position on decay rate
+```{r, warning=FALSE}
+ggplot(data, aes(x=position, y=k, fill=days)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of incubation time and position within channel") +
+    xlab("Position of strip") +
+    ylab("decay rate") 
+
+```
+
+## 4.4 Stressor influences on decay rate - **Day 28**
+```{r, warning=FALSE}
+Pesticides_28 <- factor(data_28$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data_28, mapping=aes(sediment.f, k)) + geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on decay rate - day 28") +
+    xlab("Sediment addition") +
+    ylab("decay rate")
+
+# only not covered strips
+data_28_nc <- subset(data_28, sed.cover==0)
+ggplot(data=data_28_nc, mapping=aes(sediment.f, k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on decay rate - days combined") +
+    xlab("Sediment addition") +
+    ylab("decay rate")
+
+
+ggplot(data=data_28, mapping=aes(x=Pesticides_28, y=k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+  geom_signif(comparisons = list(c("none", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("low", "none")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("medium", "none")),  map_signif_level=TRUE) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on decay rate - day 28") +
+    xlab("Pesticide treatment") +
+    ylab("decay rate")
+
+
+ggplot(data_28, aes(x=Pesticides_28, y=k, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on strip decay rate - day 28") +
+    xlab("Pesticide treatment") +
+    ylab("in decay rate")
+
+par(mfrow=c(1,1))
+```
+
+## 4.5 Stressor influences on decay rate - **Day 35**
+```{r, warning=FALSE}
+Pesticides_35 <- factor(data_35$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data_35, mapping=aes(sediment.f, k)) + geom_boxplot(alpha=0.8, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on decay rate - day 35") +
+    xlab("Sediment addition") +
+    ylab("decay rate")
+
+# only not covered strips
+data_35_nc <- subset(data_28, sed.cover==0)
+ggplot(data=data_35_nc, mapping=aes(sediment.f, k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on decay rate - days combined") +
+    xlab("Sediment addition") +
+    ylab("decay rate")
+
+ggplot(data=data_35, mapping=aes(x=Pesticides_35, y=k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+  geom_signif(comparisons = list(c("none", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("low", "none")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("medium", "none")),  map_signif_level=TRUE) +
+    theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on decay rate - day 35") +
+    xlab("Pesticide treatment") +
+    ylab("decay rate")+
+  stat_compare_means(label.y = 1.5) 
+
+
+ggplot(data_35, aes(x=Pesticides_35, y=k, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(color="black", size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2")+
+    theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on decay rate - day 35") +
+    xlab("Pesticide treatment") +
+    ylab("decay rate")
+
+par(mfrow=c(1,1))
+```
+
+## 4.6 Stressor influences on decay rate - **Days combined**
+```{r, warning=FALSE}
+pesticide <- factor(data$pesticides.f, levels = c("none", "low", "medium", "high"))
+par(mfrow=c(1,2))
+
+ggplot(data=data, mapping=aes(sediment.f, k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on decay rate - days combined") +
+    xlab("Sediment addition") +
+    ylab("decay rate")
+
+# only not covered strips
+ggplot(data=nocover, mapping=aes(sediment.f, k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3")+
+  geom_signif(comparisons = list(c("no", "yes")), map_signif_level=TRUE) + 
+  geom_jitter(color="black", size=1, alpha=0.9) +
+ theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of sediment addition on decay rate - days combined") +
+    xlab("Sediment addition") +
+    ylab("decay rate")
+
+ggplot(data=data, mapping=aes(x=pesticide, y=k)) + 
+  geom_boxplot(alpha=0.9, fill="gold3") +
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+  geom_signif(comparisons = list(c("none", "high")), map_signif_level=TRUE) +
+    geom_signif(comparisons = list(c("low", "none")),  map_signif_level=TRUE) +
+  geom_signif(comparisons = list(c("medium", "none")),  map_signif_level=TRUE) +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of pesticide addition on decay rate - days combined") +
+    xlab("Pesticide treatment") +
+    ylab("decay rate")
+
+ggplot(data, aes(x=pesticide, y=k, fill=sediment.f)) + 
+  geom_boxplot(alpha=0.9) +
+  geom_jitter(colour=ifelse(days==28, "firebrick","darkcyan"), size=1, alpha=0.9) +
+    scale_fill_brewer(palette="Dark2") +
+  theme(
+      legend.position="right",
+      plot.title = element_text(size=11)) +
+    ggtitle("Influence of both stressors on decay rate - days combined") +
+    xlab("Pesticide treatment") +
+    ylab("decay rate")
+
+par(mfrow=c(1,1))
+```
+
+# 5. Modelling: Determine effect sizes and stressor interaction
+## 5.1 Prepare modelling
+Define independent and dependent variables
+```{r}
+pesticide <- data$pesticides
+sediment  <- data$sediment
+
+pesticide_28   <- data_28$pesticides
+sediment_28    <- data_28$sediment
+mass_28        <- data_28$mass
+Rr_28          <- data_28$Rr
+Ts_28          <- data_28$X._loss
+Ts_28_day      <- data_28$X._loss_daily
+k_28           <- data_28$k
+position_28    <- data_28$location
+header_28      <- data_28$header
+cover_28       <- data_28$sed.cover
+
+pesticide_35   <- data_35$pesticides
+sediment_35    <- data_35$sediment
+mass_35        <- data_35$mass
+Rr_35          <- data_35$Rr
+Ts_35          <- data_35$X._loss
+Ts_35_day      <- data_35$X._loss_daily
+k_35           <- data_35$k
+position_35    <- data_35$location
+header_35      <- data_35$header
+cover_35       <- data_35$sed.cover
+```
+
+
+## 5.2 Modelling of respiration rate (GLMM)
+### 5.2.1 Day 28
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Rr_28 <-  lmer(Rr_28 ~ sediment_28*pesticide_28 + (1|position_28) ,  REML=FALSE)
+summary(M_Rr_28)
+r_Rr_28 <-  residuals(M_Rr_28, type="response")
+r.squaredGLMM(M_Rr_28)
+```
+```{r, warning=FALSE}
+shapiro.test(r_Rr_28) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Rr_28, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Rr_28, pch=16, col="gold3"); qqline(r_Rr_28) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Rr_28), r_Rr_28, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Rr_28, fitted(M_Rr_28)) # test correlation between residuals and fitted
+
+```
+
+
+### 5.2.2 Day 35
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Rr_35 <-  lmer(Rr_35 ~ sediment_35*pesticide_35  + (1|position_35), REML=FALSE)
+summary(M_Rr_35)
+r_Rr_35 <-  residuals(M_Rr_35, type="response")
+r.squaredGLMM(M_Rr_35)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_Rr_35) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Rr_35, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Rr_35, pch=16, col="gold3"); qqline(r_Rr_35) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Rr_35), r_Rr_35, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Rr_35, fitted(M_Rr_35)) # test correlation between residuals and fitted
+```
+
+
+### 5.2.3 Days combined
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Rr <-  lmer(Rr ~ sediment*pesticide   + (1|days)+ (1|position), REML=FALSE)
+summary(M_Rr)
+r_Rr <-  residuals(M_Rr, type="response")
+r.squaredGLMM(M_Rr)
+```
+```{r, warning=FALSE}
+shapiro.test(r_Rr) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Rr, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Rr, pch=16, col="gold3"); qqline(r_Rr) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Rr), r_Rr, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Rr, fitted(M_Rr)) # test correlation between residuals and fitted
+```
+
+
+## 5.3 **Modelling of tensile strength (GLMM)**
+### 5.3.1 Day 28
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Ts_28 <-  lmer(Ts_28 ~ sediment_28*pesticide_28  + (1|position_28),  REML=FALSE)
+summary(M_Ts_28)
+r_Ts_28 <-  residuals(M_Ts_28, type="response")
+r.squaredGLMM(M_Ts_28)
+```
+### -- covered by sediment
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Ts_28_c <-  lmer(Ts_28 ~ cover_28*pesticide_28  + (1|position_28) ,  REML=FALSE)
+summary(M_Ts_28_c)
+r_Ts_28_c <-  residuals(M_Ts_28_c, type="response")
+r.squaredGLMM(M_Ts_28_c)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_Ts_28) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Ts_28, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Ts_28, pch=16, col="gold3"); qqline(r_Ts_28) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Ts_28), r_Ts_28, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Ts_28, fitted(M_Ts_28)) # test correlation between residuals and fitted
+```
+
+
+### 5.3.2 Day 35
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Ts_35 <-  lmer(Ts_35 ~ sediment_35*pesticide_35  + (1|position_35) ,  REML=FALSE)
+summary(M_Ts_35)
+r_Ts_35 <-  residuals(M_Ts_35, type="response")
+r.squaredGLMM(M_Ts_35)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_Ts_35) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Ts_35, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Ts_35, pch=16, col="gold3"); qqline(r_Ts_35) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Ts_35), r_Ts_35, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Ts_35, fitted(M_Ts_35)) # test correlation between residuals and fitted
+```
+
+### -- covered by sediment
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Ts_35_c <-  lmer(Ts_35 ~ cover_35*pesticide_35  + (1|position_35) ,  REML=FALSE)
+summary(M_Ts_35_c)
+r_Ts_35_c <-  residuals(M_Ts_35_c, type="response")
+r.squaredGLMM(M_Ts_35_c)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_Ts_35_c) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Ts_35_c, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Ts_35_c, pch=16, col="gold3"); qqline(r_Ts_35_c) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Ts_35_c), r_Ts_35_c, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Ts_35_c, fitted(M_Ts_35_c)) # test correlation between residuals and fitted
+```
+
+### 5.3.3 Days combined 
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_Ts <-  lmer(Ts ~ sediment*pesticide  + (1|days) + (1|position), REML=FALSE)
+summary(M_Ts)
+r_Ts <-  residuals(M_Ts, type="response")
+r.squaredGLMM(M_Ts)
+```
+```{r, warning=FALSE}
+shapiro.test(r_Ts) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_Ts, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_Ts, pch=16, col="gold3"); qqline(r_Ts) # plot residuals against normal quantiles --> points should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_Ts), r_Ts, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_Ts, fitted(M_Ts)) # test correlation between residuals and fitted
+```
+
+## 5.4 **Modelling of decay rate (GLMM)**
+### 5.4.1 Day 28
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_k_28 <-  lmer(k_28 ~ sediment_28*pesticide_28  + (1|position_28),  REML=FALSE)
+summary(M_k_28)
+r_k_28 <-  residuals(M_k_28, type="response")
+r.squaredGLMM(M_k_28)
+```
+### -- covered by sediment
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_k_28_c <-  lmer(k_28 ~ cover_28*pesticide_28  + (1|position_28) ,  REML=FALSE)
+summary(M_k_28_c)
+r_k_28_c <-  residuals(M_k_28_c, type="response")
+r.squaredGLMM(M_k_28_c)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_k_28) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_k_28, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_k_28, pch=16, col="gold3"); qqline(r_k_28) # plot residuals against normal quantiles --> poink should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_k_28), r_k_28, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_k_28, fitted(M_k_28)) # test correlation between residuals and fitted
+```
+
+
+### 5.4.2 Day 35
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_k_35 <-  lmer(k_35 ~ sediment_35*pesticide_35  + (1|position_35) ,  REML=FALSE)
+summary(M_k_35)
+r_k_35 <-  residuals(M_k_35, type="response")
+r.squaredGLMM(M_k_35)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_k_35) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_k_35, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_k_35, pch=16, col="gold3"); qqline(r_k_35) # plot residuals against normal quantiles --> poink should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_k_35), r_k_35, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_k_35, fitted(M_k_35)) # test correlation between residuals and fitted
+```
+
+### -- covered by sediment
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_k_35_c <-  lmer(k_35 ~ cover_35*pesticide_35  + (1|position_35) ,  REML=FALSE)
+summary(M_k_35_c)
+r_k_35_c <-  residuals(M_k_35_c, type="response")
+r.squaredGLMM(M_k_35_c)
+
+```
+```{r, warning=FALSE}
+shapiro.test(r_k_35_c) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_k_35_c, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_k_35_c, pch=16, col="gold3"); qqline(r_k_35_c) # plot residuals against normal quantiles --> poink should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_k_35_c), r_k_35_c, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_k_35_c, fitted(M_k_35_c)) # test correlation between residuals and fitted
+```
+
+### 5.4.3 Days combined 
+```{r, warning=FALSE, class.source = 'fold-show'}
+M_k <-  lmer(k ~ sediment*pesticide  + (1|days) + (1|position), REML=FALSE)
+summary(M_k)
+r_k <-  residuals(M_k, type="response")
+r.squaredGLMM(M_k)
+```
+```{r, warning=FALSE}
+shapiro.test(r_k) # test for normality of residuals --> p value should be >0.05
+par(mfrow=c(1,2))
+hist(r_k, col="gold3") # histogram of residuals --> should look normally distributed
+qqnorm(r_k, pch=16, col="gold3"); qqline(r_k) # plot residuals against normal quantiles --> poink should be close to line
+par(mfrow=c(1,1))
+plot(fitted(M_k), r_k, pch=16, col="gold3") # fitted vs residuals plot
+cor.test(r_k, fitted(M_k)) # test correlation between residuals and fitted
+```
+
